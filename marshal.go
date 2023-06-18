@@ -250,6 +250,10 @@ type marshalerCache struct {
 }
 
 func (mc *marshalerCache) Marshal(cfg MarshalConfig, src any, v map[string][]string) error {
+	if v == nil {
+		return errors.New("cannot marshal into a nil map")
+	}
+
 	val := reflect.ValueOf(src)
 
 	key := marshalerCacheKey{
