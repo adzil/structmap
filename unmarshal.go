@@ -340,6 +340,10 @@ func newFieldUnmarshaler(cfg unmarshalConfig, structFld reflect.StructField) (fi
 	}
 
 	if field.nested {
+		if field.required {
+			return fieldUnmarshaler{}, errors.New("cannot set required option for struct")
+		}
+
 		return field, nil
 	}
 
