@@ -41,7 +41,7 @@ func TestUnmarshal(t *testing.T) {
 		LeftEmpty: "abcd",
 	}
 
-	um, err := newUnmarshaler(reflect.TypeOf((*Person)(nil)).Elem())
+	um, err := newUnmarshaler(unmarshalConfig{}, reflect.TypeOf((*Person)(nil)).Elem())
 	require.NoError(t, err)
 
 	val := url.Values{
@@ -61,7 +61,7 @@ func TestUnmarshal(t *testing.T) {
 }
 
 func BenchmarkUnmarshal(b *testing.B) {
-	um, err := newUnmarshaler(reflect.TypeOf((*Person)(nil)).Elem())
+	um, err := newUnmarshaler(unmarshalConfig{}, reflect.TypeOf((*Person)(nil)).Elem())
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -75,11 +75,11 @@ func BenchmarkUnmarshal(b *testing.B) {
 		"int_slice[]": []string{"13", "23", "25"},
 	}
 
-	for n := 0; n < b.N; n++ {
-		person := Person{
-			LeftEmpty: "abcd",
-		}
+	person := Person{
+		LeftEmpty: "abcd",
+	}
 
+	for n := 0; n < b.N; n++ {
 		if err := um.unmarshal(unmarshalContext{}, val, reflect.ValueOf(&person).Elem()); err != nil {
 			b.Fatal(err)
 		}
