@@ -2,7 +2,6 @@ package dstruct
 
 import (
 	"net/url"
-	"reflect"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -41,9 +40,6 @@ func TestUnmarshal(t *testing.T) {
 		LeftEmpty: "abcd",
 	}
 
-	um, err := newUnmarshaler(unmarshalConfig{}, reflect.TypeOf((*Person)(nil)).Elem())
-	require.NoError(t, err)
-
 	val := url.Values{
 		"first_name":  []string{"abcd"},
 		"LastName":    []string{"hehehe"},
@@ -53,19 +49,11 @@ func TestUnmarshal(t *testing.T) {
 		"int_slice[]": []string{"13", "23", "25"},
 	}
 
-	data := reflect.ValueOf(&person).Elem()
-
-	err = um.unmarshal(unmarshalContext{}, val, data)
-
+	err := Unmarshal(val, &person)
 	require.NoError(t, err)
 }
 
 func BenchmarkUnmarshal(b *testing.B) {
-	um, err := newUnmarshaler(unmarshalConfig{}, reflect.TypeOf((*Person)(nil)).Elem())
-	if err != nil {
-		b.Fatal(err)
-	}
-
 	val := url.Values{
 		"first_name":  []string{"abcd"},
 		"LastName":    []string{"hehehe"},
@@ -80,7 +68,7 @@ func BenchmarkUnmarshal(b *testing.B) {
 	}
 
 	for n := 0; n < b.N; n++ {
-		if err := um.unmarshal(unmarshalContext{}, val, reflect.ValueOf(&person).Elem()); err != nil {
+		if err := Unmarshal(val, &person); err != nil {
 			b.Fatal(err)
 		}
 	}

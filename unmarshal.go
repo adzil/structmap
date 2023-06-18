@@ -333,8 +333,8 @@ func newFieldUnmarshaler(cfg unmarshalConfig, structFld reflect.StructField) (fi
 
 	var err error
 	if field.unmarshaler, field.nested, err = newValueUnmarshaler(unmarshalConfig{
-		Delimiter: cfg.Delimiter,
-		Prefix:    prefix,
+		UnmarshalConfig: cfg.UnmarshalConfig,
+		Prefix:          prefix,
 	}, structFld.Type); err != nil {
 		return fieldUnmarshaler{}, fmt.Errorf("struct field %s: %w", structFld.Name, err)
 	}
@@ -375,17 +375,25 @@ func newStructUnmarshaler(cfg unmarshalConfig, typ reflect.Type) (unmarshaler, e
 	}, nil
 }
 
-type unmarshalConfig struct {
+type UnmarshalConfig struct {
 	Delimiter string
-	Prefix    []string
 }
 
-func (c unmarshalConfig) delimiter() string {
-	if c.Delimiter != "" {
-		return c.Delimiter
+func (cfg UnmarshalConfig) delimiter() string {
+	if cfg.Delimiter != "" {
+		return cfg.Delimiter
 	}
 
 	return "."
+}
+
+func (cfg UnmarshalConfig) Unmarshal(v map[string][]string, dst any) error {
+	return defaultUnmarshaler.Unmarshal(cfg, v, dst)
+}
+
+type unmarshalConfig struct {
+	UnmarshalConfig
+	Prefix []string
 }
 
 func newUnmarshaler(cfg unmarshalConfig, typ reflect.Type) (unmarshaler, error) {
@@ -406,4 +414,42 @@ func newUnmarshaler(cfg unmarshalConfig, typ reflect.Type) (unmarshaler, error) 
 	}
 
 	return nil, fmt.Errorf("cannot unmarshal into %s", typ.Kind().String())
+}
+
+type unmarshalerCacheKey struct {
+	typ    reflect.Type
+	config UnmarshalConfig
+}
+
+type unmarshalerCache struct {
+	cache cache[unmarshalerCacheKey, unmarshaler]
+}
+
+func (uc *unmarshalerCache) Unmarshal(cfg UnmarshalConfig, v map[string][]string, dst any) error {
+	val := reflect.ValueOf(dst)
+
+	if val.Kind() != reflect.Pointer || val.IsNil() {
+		return errors.New("can only unmarshal into a non-nil pointer")
+	}
+
+	elem := val.Elem()
+	key := unmarshalerCacheKey{
+		typ:    elem.Type(),
+		config: cfg,
+	}
+
+	vu, err := uc.cache.Get(key, func(key unmarshalerCacheKey) (unmarshaler, error) {
+		return newUnmarshaler(unmarshalConfig{UnmarshalConfig: key.config}, key.typ)
+	})
+	if err != nil {
+		return err
+	}
+
+	return vu.unmarshal(unmarshalContext{}, v, elem)
+}
+
+var defaultUnmarshaler unmarshalerCache
+
+func Unmarshal(v map[string][]string, dst any) error {
+	return defaultUnmarshaler.Unmarshal(UnmarshalConfig{}, v, dst)
 }
