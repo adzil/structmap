@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"strconv"
 	"strings"
 )
 
@@ -11,10 +12,17 @@ var (
 	_ marshaler = (*pointerMarshaler)(nil)
 	_ marshaler = (*structMarshaler)(nil)
 	_ marshaler = (*stringMarshaler)(nil)
+	_ marshaler = (*intMarshaler)(nil)
+	_ marshaler = (*methodMarshaler)(nil)
+	_ marshaler = (*sliceMarshaler)(nil)
 )
 
 var (
 	errMissingValue = errors.New("missing required value")
+)
+
+var (
+	valueMarshalerReflectType = reflect.TypeOf((*ValueMarshaler)(nil)).Elem()
 )
 
 type ValueMarshaler interface {
@@ -61,10 +69,22 @@ func (m *structMarshaler) marshal(src reflect.Value, v map[string][]string) erro
 	return nil
 }
 
-type stringMarshaler struct {
+type keyMarshaler struct {
 	key       string
 	required  bool
 	omitempty bool
+}
+
+func newKeyMarshaler(cfg marshalConfig) keyMarshaler {
+	return keyMarshaler{
+		key:       cfg.name(),
+		required:  cfg.Required,
+		omitempty: cfg.OmitEmpty,
+	}
+}
+
+type stringMarshaler struct {
+	keyMarshaler
 }
 
 func (m *stringMarshaler) marshal(src reflect.Value, v map[string][]string) error {
@@ -81,6 +101,99 @@ func (m *stringMarshaler) marshal(src reflect.Value, v map[string][]string) erro
 	}
 
 	v[m.key] = append(v[m.key][:0], val)
+
+	return nil
+}
+
+type intMarshaler struct {
+	keyMarshaler
+}
+
+func (m *intMarshaler) marshal(src reflect.Value, v map[string][]string) error {
+	val := src.Int()
+
+	if val == 0 {
+		if m.required {
+			return errMissingValue
+		}
+
+		if m.omitempty {
+			return nil
+		}
+	}
+
+	v[m.key] = append(v[m.key][:0], strconv.FormatInt(val, 10))
+
+	return nil
+}
+
+type methodMarshaler struct {
+	keyMarshaler
+	ptrReceiver bool
+}
+
+func (m *methodMarshaler) marshal(src reflect.Value, v map[string][]string) error {
+	if m.ptrReceiver {
+		if !src.CanAddr() {
+			return errors.New("unable to call MarshalValue to an unadressable value")
+		}
+
+		src = src.Addr()
+	}
+
+	val, err := src.Interface().(ValueMarshaler).MarshalValue()
+	if err != nil {
+		return err
+	}
+
+	if len(val) == 0 {
+		if m.required {
+			return errMissingValue
+		}
+
+		if m.omitempty {
+			return nil
+		}
+	}
+
+	v[m.key] = append(v[m.key][:0], val...)
+
+	return nil
+}
+
+type sliceMarshaler struct {
+	keyMarshaler
+	intElem bool
+}
+
+func (m *sliceMarshaler) marshal(src reflect.Value, v map[string][]string) error {
+	n := src.Len()
+
+	if n == 0 {
+		if m.required {
+			return errMissingValue
+		}
+
+		if m.omitempty {
+			return nil
+		}
+	}
+
+	out := v[m.key][:0]
+
+	for i := 0; i < n; i++ {
+		var val string
+
+		if m.intElem {
+			val = strconv.FormatInt(src.Index(i).Int(), 10)
+		} else {
+			val = src.Index(i).String()
+		}
+
+		out = append(out, val)
+	}
+
+	v[m.key] = out
 
 	return nil
 }
@@ -118,7 +231,43 @@ func (c *marshalConfig) applyOption(opt string) {
 	}
 }
 
+func (c *marshalConfig) name() string {
+	return strings.Join(c.Name, c.delimiter())
+}
+
+func newSliceMarshaler(cfg marshalConfig, typ reflect.Type) (marshaler, error) {
+	elem := typ.Elem()
+
+	switch elem.Kind() {
+	case reflect.String:
+		return &sliceMarshaler{keyMarshaler: newKeyMarshaler(cfg)}, nil
+
+	case reflect.Int, reflect.Int64, reflect.Int32, reflect.Int16, reflect.Int8:
+		return &sliceMarshaler{
+			keyMarshaler: newKeyMarshaler(cfg),
+			intElem:      true,
+		}, nil
+	}
+
+	return nil, fmt.Errorf("cannot marshal from slice of %s", elem.Kind().String())
+}
+
 func newValueMarshaler(cfg marshalConfig, typ reflect.Type) (marshaler, error) {
+	var valReceiver bool
+
+	switch {
+	case typ.Implements(valueMarshalerReflectType):
+		valReceiver = true
+
+		fallthrough
+
+	case reflect.PointerTo(typ).Implements(valueMarshalerReflectType):
+		return &methodMarshaler{
+			keyMarshaler: newKeyMarshaler(cfg),
+			ptrReceiver:  !valReceiver,
+		}, nil
+	}
+
 	switch typ.Kind() {
 	case reflect.Pointer:
 		mv, err := newValueMarshaler(cfg, typ.Elem())
@@ -142,12 +291,14 @@ func newValueMarshaler(cfg marshalConfig, typ reflect.Type) (marshaler, error) {
 
 		return newStructMarshaler(cfg, typ)
 
+	case reflect.Slice:
+		return newSliceMarshaler(cfg, typ)
+
 	case reflect.String:
-		return &stringMarshaler{
-			key:       strings.Join(cfg.Name, cfg.delimiter()),
-			required:  cfg.Required,
-			omitempty: cfg.OmitEmpty,
-		}, nil
+		return &stringMarshaler{keyMarshaler: newKeyMarshaler(cfg)}, nil
+
+	case reflect.Int, reflect.Int64, reflect.Int32, reflect.Int16, reflect.Int8:
+		return &intMarshaler{keyMarshaler: newKeyMarshaler(cfg)}, nil
 	}
 
 	return nil, fmt.Errorf("cannot marshal from %s", typ.Kind().String())
