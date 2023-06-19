@@ -15,9 +15,13 @@ func (x *RawValue) UnmarshalValue(v []string) error {
 	return nil
 }
 
+func (x *RawValue) MarshalValue() ([]string, error) {
+	return *x, nil
+}
+
 type FullName struct {
 	FirstName string `map:"first_name"`
-	LastName  string `map:",required,omitempty"`
+	LastName  string `map:",required"`
 }
 
 type Occupation struct {

@@ -14,8 +14,7 @@ var (
 	_ unmarshaler = (*stringUnmarshaler)(nil)
 	_ unmarshaler = (*intUnmarshaler)(nil)
 	_ unmarshaler = (*methodUnmarshaler)(nil)
-	_ unmarshaler = (*stringSliceUnmarshaler)(nil)
-	_ unmarshaler = (*intSliceUnmarshaler)(nil)
+	_ unmarshaler = (*sliceUnmarshaler)(nil)
 )
 
 var (
@@ -151,38 +150,22 @@ func (u *methodUnmarshaler) unmarshal(ctx unmarshalContext, _ map[string][]strin
 	}
 
 	if u.ptrReceiver {
+		if !dst.CanAddr() {
+			return errors.New("unable to call UnmarshalValue to an unadressable value")
+		}
+
 		dst = dst.Addr()
 	}
 
 	return dst.Interface().(ValueUnmarshaler).UnmarshalValue(ctx.value)
 }
 
-type stringSliceUnmarshaler struct{}
-
-func (u *stringSliceUnmarshaler) unmarshal(ctx unmarshalContext, _ map[string][]string, dst reflect.Value) error {
-	// TODO (adzil): Merge this code with the intSliceUnmarshaler.unmarshal
-	// after Go 1.21 has been released. If we call reflect.ValueOf(ctx.value)
-	// on the current version there will be an additional allocation so we want to
-	// avoid that if possible.
-	valPtr := dst.Addr().Interface().(*[]string)
-
-	if cap(*valPtr) < len(ctx.value) {
-		*valPtr = make([]string, len(ctx.value))
-	} else if len(*valPtr) != len(ctx.value) {
-		*valPtr = (*valPtr)[:len(*valPtr)]
-	}
-
-	copy(*valPtr, ctx.value)
-
-	return nil
-}
-
-type intSliceUnmarshaler struct {
+type sliceUnmarshaler struct {
 	typ     reflect.Type
 	bitSize int
 }
 
-func (u *intSliceUnmarshaler) unmarshal(ctx unmarshalContext, _ map[string][]string, dst reflect.Value) error {
+func (u *sliceUnmarshaler) unmarshal(ctx unmarshalContext, _ map[string][]string, dst reflect.Value) error {
 	if dst.Cap() < len(ctx.value) {
 		dst.Set(reflect.MakeSlice(u.typ, len(ctx.value), len(ctx.value)))
 	} else if dst.Len() != len(ctx.value) {
@@ -190,12 +173,16 @@ func (u *intSliceUnmarshaler) unmarshal(ctx unmarshalContext, _ map[string][]str
 	}
 
 	for i := 0; i < len(ctx.value); i++ {
-		val, err := strconv.ParseInt(ctx.value[i], 10, u.bitSize)
-		if err != nil {
-			return fmt.Errorf("int slice index #%d: %w", i, err)
-		}
+		if u.bitSize > 0 {
+			val, err := strconv.ParseInt(ctx.value[i], 10, u.bitSize)
+			if err != nil {
+				return fmt.Errorf("int slice index #%d: %w", i, err)
+			}
 
-		dst.Index(i).SetInt(val)
+			dst.Index(i).SetInt(val)
+		} else {
+			dst.Index(i).SetString(ctx.value[i])
+		}
 	}
 
 	return nil
@@ -242,11 +229,11 @@ func newSliceUnmarshaler(typ reflect.Type) (unmarshaler, error) {
 	elem := typ.Elem()
 
 	if elem.Kind() == reflect.String {
-		return &stringSliceUnmarshaler{}, nil
+		return &sliceUnmarshaler{typ: typ}, nil
 	}
 
 	if bitSize := getIntSize(elem.Kind()); bitSize > 0 {
-		return &intSliceUnmarshaler{
+		return &sliceUnmarshaler{
 			typ:     typ,
 			bitSize: bitSize,
 		}, nil
@@ -256,18 +243,18 @@ func newSliceUnmarshaler(typ reflect.Type) (unmarshaler, error) {
 }
 
 func newValueUnmarshaler(cfg unmarshalConfig, typ reflect.Type) (unm unmarshaler, nested bool, err error) {
-	var ptrReceiver bool
+	var valReceiver bool
 
 	switch {
-	case reflect.PointerTo(typ).Implements(valueUnmarshalerReflectType):
-		ptrReceiver = true
+	case typ.Implements(valueUnmarshalerReflectType):
+		valReceiver = true
 
 		fallthrough
 
-	case typ.Implements(valueUnmarshalerReflectType):
+	case reflect.PointerTo(typ).Implements(valueUnmarshalerReflectType):
 		return &methodUnmarshaler{
 			newFn:       buildNewFunc(typ),
-			ptrReceiver: ptrReceiver,
+			ptrReceiver: !valReceiver,
 		}, false, nil
 	}
 
