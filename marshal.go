@@ -34,6 +34,7 @@ type marshaler interface {
 }
 
 type pointerMarshaler struct {
+	key      string
 	required bool
 	elem     marshaler
 }
@@ -44,7 +45,11 @@ func (m *pointerMarshaler) marshal(src reflect.Value, v map[string][]string) err
 	}
 
 	if m.required {
-		return errMissingValue
+		if m.key == "" {
+			return errMissingValue
+		}
+
+		return fmt.Errorf("key %s: %w", m.key, errMissingValue)
 	}
 
 	return nil
@@ -72,14 +77,14 @@ func (m *structMarshaler) marshal(src reflect.Value, v map[string][]string) erro
 type keyMarshaler struct {
 	key       string
 	required  bool
-	omitempty bool
+	omitEmpty bool
 }
 
 func newKeyMarshaler(cfg marshalConfig) keyMarshaler {
 	return keyMarshaler{
 		key:       cfg.name(),
 		required:  cfg.Required,
-		omitempty: cfg.OmitEmpty,
+		omitEmpty: cfg.OmitEmpty,
 	}
 }
 
@@ -92,10 +97,10 @@ func (m *stringMarshaler) marshal(src reflect.Value, v map[string][]string) erro
 
 	if val == "" {
 		if m.required {
-			return errMissingValue
+			return fmt.Errorf("key %s: %w", m.key, errMissingValue)
 		}
 
-		if m.omitempty {
+		if m.omitEmpty {
 			return nil
 		}
 	}
@@ -114,10 +119,10 @@ func (m *intMarshaler) marshal(src reflect.Value, v map[string][]string) error {
 
 	if val == 0 {
 		if m.required {
-			return errMissingValue
+			return fmt.Errorf("key %s: %w", m.key, errMissingValue)
 		}
 
-		if m.omitempty {
+		if m.omitEmpty {
 			return nil
 		}
 	}
@@ -148,10 +153,10 @@ func (m *methodMarshaler) marshal(src reflect.Value, v map[string][]string) erro
 
 	if len(val) == 0 {
 		if m.required {
-			return errMissingValue
+			return fmt.Errorf("key %s: %w", m.key, errMissingValue)
 		}
 
-		if m.omitempty {
+		if m.omitEmpty {
 			return nil
 		}
 	}
@@ -171,10 +176,10 @@ func (m *sliceMarshaler) marshal(src reflect.Value, v map[string][]string) error
 
 	if n == 0 {
 		if m.required {
-			return errMissingValue
+			return fmt.Errorf("key %s: %w", m.key, errMissingValue)
 		}
 
-		if m.omitempty {
+		if m.omitEmpty {
 			return nil
 		}
 	}
@@ -276,6 +281,7 @@ func newValueMarshaler(cfg marshalConfig, typ reflect.Type) (marshaler, error) {
 		}
 
 		return &pointerMarshaler{
+			key:      cfg.name(),
 			required: cfg.Required,
 			elem:     mv,
 		}, nil
