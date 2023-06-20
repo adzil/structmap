@@ -19,6 +19,7 @@ package structmap
 import (
 	"errors"
 	"fmt"
+	"net/http"
 	"reflect"
 	"strconv"
 	"strings"
@@ -39,6 +40,16 @@ var (
 
 var (
 	valueUnmarshalerReflectType = reflect.TypeOf((*ValueUnmarshaler)(nil)).Elem()
+)
+
+var (
+	DefaultUnmarshaler Unmarshaler
+
+	HeaderUnmarshaler = Unmarshaler{
+		config: UnmarshalConfig{
+			KeyLookupFunc: http.CanonicalHeaderKey,
+		},
+	}
 )
 
 type ValueUnmarshaler interface {
@@ -365,6 +376,10 @@ func newFieldUnmarshaler(cfg unmarshalConfig, structFld reflect.StructField) (fi
 
 	field.name = strings.Join(prefix, cfg.delimiter())
 
+	if cfg.KeyLookupFunc != nil {
+		field.name = cfg.KeyLookupFunc(field.name)
+	}
+
 	return field, nil
 }
 
@@ -392,7 +407,8 @@ func newStructUnmarshaler(cfg unmarshalConfig, typ reflect.Type) (unmarshaler, e
 }
 
 type UnmarshalConfig struct {
-	Delimiter string
+	Delimiter     string
+	KeyLookupFunc func(s string) string
 }
 
 func (cfg UnmarshalConfig) delimiter() string {
@@ -401,10 +417,6 @@ func (cfg UnmarshalConfig) delimiter() string {
 	}
 
 	return "."
-}
-
-func (cfg UnmarshalConfig) Unmarshal(v map[string][]string, dst any) error {
-	return defaultUnmarshaler.Unmarshal(cfg, v, dst)
 }
 
 type unmarshalConfig struct {
@@ -432,16 +444,18 @@ func newUnmarshaler(cfg unmarshalConfig, typ reflect.Type) (unmarshaler, error) 
 	return nil, fmt.Errorf("cannot unmarshal into %s", typ.Kind().String())
 }
 
-type unmarshalerCacheKey struct {
-	typ    reflect.Type
+type Unmarshaler struct {
+	cache  cache[reflect.Type, unmarshaler]
 	config UnmarshalConfig
 }
 
-type unmarshalerCache struct {
-	cache cache[unmarshalerCacheKey, unmarshaler]
+func NewUnmarshaler(cfg UnmarshalConfig) *Unmarshaler {
+	return &Unmarshaler{
+		config: cfg,
+	}
 }
 
-func (uc *unmarshalerCache) Unmarshal(cfg UnmarshalConfig, v map[string][]string, dst any) error {
+func (u *Unmarshaler) Unmarshal(v map[string][]string, dst any) error {
 	val := reflect.ValueOf(dst)
 
 	if val.Kind() != reflect.Pointer || val.IsNil() {
@@ -449,13 +463,9 @@ func (uc *unmarshalerCache) Unmarshal(cfg UnmarshalConfig, v map[string][]string
 	}
 
 	elem := val.Elem()
-	key := unmarshalerCacheKey{
-		typ:    elem.Type(),
-		config: cfg,
-	}
 
-	vu, err := uc.cache.Get(key, func(key unmarshalerCacheKey) (unmarshaler, error) {
-		return newUnmarshaler(unmarshalConfig{UnmarshalConfig: key.config}, key.typ)
+	vu, err := u.cache.Get(elem.Type(), func(key reflect.Type) (unmarshaler, error) {
+		return newUnmarshaler(unmarshalConfig{UnmarshalConfig: u.config}, key)
 	})
 	if err != nil {
 		return err
@@ -464,8 +474,10 @@ func (uc *unmarshalerCache) Unmarshal(cfg UnmarshalConfig, v map[string][]string
 	return vu.unmarshal(unmarshalContext{}, v, elem)
 }
 
-var defaultUnmarshaler unmarshalerCache
-
 func Unmarshal(v map[string][]string, dst any) error {
-	return defaultUnmarshaler.Unmarshal(UnmarshalConfig{}, v, dst)
+	return DefaultUnmarshaler.Unmarshal(v, dst)
+}
+
+func UnmarshalHeader(v http.Header, dst any) error {
+	return HeaderUnmarshaler.Unmarshal(v, dst)
 }
