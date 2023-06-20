@@ -19,6 +19,7 @@ package structmap
 import (
 	"errors"
 	"fmt"
+	"net/http"
 	"reflect"
 	"strconv"
 	"strings"
@@ -39,6 +40,16 @@ var (
 
 var (
 	valueMarshalerReflectType = reflect.TypeOf((*ValueMarshaler)(nil)).Elem()
+)
+
+var (
+	DefaultMarshaler Marshaler
+
+	HeaderMarshaler = Marshaler{
+		config: MarshalConfig{
+			KeyLookupFunc: http.CanonicalHeaderKey,
+		},
+	}
 )
 
 type ValueMarshaler interface {
@@ -220,11 +231,8 @@ func (m *sliceMarshaler) marshal(src reflect.Value, v map[string][]string) error
 }
 
 type MarshalConfig struct {
-	Delimiter string
-}
-
-func (cfg MarshalConfig) Marshal(src any, v map[string][]string) error {
-	return defaultMarshaler.Marshal(cfg, src, v)
+	Delimiter     string
+	KeyLookupFunc func(s string) string
 }
 
 func (c MarshalConfig) delimiter() string {
@@ -259,7 +267,13 @@ func (c *marshalConfig) applyOption(opt string) error {
 }
 
 func (c *marshalConfig) name() string {
-	return strings.Join(c.Name, c.delimiter())
+	key := strings.Join(c.Name, c.delimiter())
+
+	if c.KeyLookupFunc != nil {
+		key = c.KeyLookupFunc(key)
+	}
+
+	return key
 }
 
 func newSliceMarshaler(cfg marshalConfig, typ reflect.Type) (marshaler, error) {
@@ -421,29 +435,20 @@ func newMarshaler(cfg marshalConfig, typ reflect.Type) (marshaler, error) {
 	return nil, fmt.Errorf("cannot marshal from %s", typ.Kind().String())
 }
 
-type marshalerCacheKey struct {
-	typ    reflect.Type
+type Marshaler struct {
+	cache  cache[reflect.Type, marshaler]
 	config MarshalConfig
 }
 
-type marshalerCache struct {
-	cache cache[marshalerCacheKey, marshaler]
-}
-
-func (mc *marshalerCache) Marshal(cfg MarshalConfig, src any, v map[string][]string) error {
+func (m *Marshaler) Marshal(src any, v map[string][]string) error {
 	if v == nil {
 		return errors.New("cannot marshal into a nil map")
 	}
 
 	val := reflect.ValueOf(src)
 
-	key := marshalerCacheKey{
-		typ:    val.Type(),
-		config: cfg,
-	}
-
-	vm, err := mc.cache.Get(key, func(k marshalerCacheKey) (marshaler, error) {
-		return newMarshaler(marshalConfig{MarshalConfig: key.config}, k.typ)
+	vm, err := m.cache.Get(val.Type(), func(key reflect.Type) (marshaler, error) {
+		return newMarshaler(marshalConfig{MarshalConfig: m.config}, key)
 	})
 	if err != nil {
 		return err
@@ -452,8 +457,16 @@ func (mc *marshalerCache) Marshal(cfg MarshalConfig, src any, v map[string][]str
 	return vm.marshal(val, v)
 }
 
-var defaultMarshaler marshalerCache
+func NewMarshaler(cfg MarshalConfig) *Marshaler {
+	return &Marshaler{
+		config: cfg,
+	}
+}
 
 func Marshal(src any, v map[string][]string) error {
-	return defaultMarshaler.Marshal(MarshalConfig{}, src, v)
+	return DefaultMarshaler.Marshal(src, v)
+}
+
+func MarshalHeader(src any, v http.Header) error {
+	return HeaderMarshaler.Marshal(src, v)
 }

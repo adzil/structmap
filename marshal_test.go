@@ -17,6 +17,7 @@ limitations under the License.
 package structmap_test
 
 import (
+	"net/http"
 	"testing"
 
 	"github.com/adzil/structmap"
@@ -49,4 +50,26 @@ func TestMarshal(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, expected, actual)
 	})
+}
+
+func TestMarshalHeader(t *testing.T) {
+	type testHeader struct {
+		ContentType string `map:"content-type"`
+		Accept      string `map:"accept"`
+	}
+
+	data := testHeader{
+		ContentType: "application/json",
+		Accept:      "application/xml",
+	}
+
+	expected := make(http.Header)
+	expected.Set("Accept", data.Accept)
+	expected.Set("Content-Type", data.ContentType)
+
+	actual := make(http.Header)
+
+	err := structmap.MarshalHeader(data, actual)
+	require.NoError(t, err)
+	assert.Equal(t, expected, actual)
 }
