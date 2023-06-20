@@ -1,4 +1,4 @@
-package dstruct
+package structmap
 
 import "sync"
 

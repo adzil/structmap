@@ -1,4 +1,4 @@
-module github.com/adzil/dstruct
+module github.com/adzil/structmap
 
 go 1.20
 

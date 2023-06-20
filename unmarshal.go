@@ -1,4 +1,4 @@
-package dstruct
+package structmap
 
 import (
 	"errors"
@@ -58,11 +58,19 @@ type fieldUnmarshaler struct {
 	unmarshaler unmarshaler
 }
 
-func (c *fieldUnmarshaler) applyOption(opt string) {
+func (c *fieldUnmarshaler) applyOption(opt string) error {
 	switch opt {
 	case "required":
 		c.required = true
+	case "omitempty":
+		// This option is only valid for marhsaler so it will be ignored.
+	case "":
+		// Allow empty option.
+	default:
+		return fmt.Errorf("unknown option %s", opt)
 	}
+
+	return nil
 }
 
 type structUnmarshaler struct {
@@ -150,10 +158,9 @@ func (u *methodUnmarshaler) unmarshal(ctx unmarshalContext, _ map[string][]strin
 	}
 
 	if u.ptrReceiver {
-		if !dst.CanAddr() {
-			return errors.New("unable to call UnmarshalValue to an unadressable value")
-		}
-
+		// TODO: Make sure that this is guaranteed to be addressable or not.
+		// The non-nil pointer check already in place at the top-level function
+		// so it must always be addressable.
 		dst = dst.Addr()
 	}
 
@@ -308,7 +315,9 @@ func newFieldUnmarshaler(cfg unmarshalConfig, structFld reflect.StructField) (fi
 	}
 
 	for i := 1; i < len(tag); i++ {
-		field.applyOption(tag[i])
+		if err := field.applyOption(tag[i]); err != nil {
+			return fieldUnmarshaler{}, err
+		}
 	}
 
 	prefix := cfg.Prefix

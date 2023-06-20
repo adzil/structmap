@@ -1,4 +1,4 @@
-package dstruct
+package structmap
 
 import (
 	"errors"
@@ -227,13 +227,19 @@ type marshalConfig struct {
 	OmitEmpty    bool
 }
 
-func (c *marshalConfig) applyOption(opt string) {
+func (c *marshalConfig) applyOption(opt string) error {
 	switch opt {
 	case "required":
 		c.Required = true
 	case "omitempty":
 		c.OmitEmpty = true
+	case "":
+		// Allow empty option.
+	default:
+		return fmt.Errorf("unknown option %s", opt)
 	}
+
+	return nil
 }
 
 func (c *marshalConfig) name() string {
@@ -336,7 +342,9 @@ func newFieldMarshaler(cfg marshalConfig, structFld reflect.StructField) (fieldM
 	}
 
 	for i := 1; i < len(tag); i++ {
-		fieldCfg.applyOption(tag[i])
+		if err := fieldCfg.applyOption(tag[i]); err != nil {
+			return fieldMarshaler{}, err
+		}
 	}
 
 	if fieldCfg.Required && fieldCfg.OmitEmpty {

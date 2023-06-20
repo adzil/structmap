@@ -1,79 +1,110 @@
-package dstruct
+package structmap_test
 
 import (
-	"net/url"
 	"testing"
 
+	"github.com/adzil/structmap"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-type RawValue []string
-
-func (x *RawValue) UnmarshalValue(v []string) error {
-	*x = v
-
-	return nil
-}
-
-func (x *RawValue) MarshalValue() ([]string, error) {
-	return *x, nil
-}
-
-type FullName struct {
-	FirstName string `map:"first_name"`
-	LastName  string `map:",required"`
-}
-
-type Occupation struct {
-	JobTitle   string
-	Department string
-}
-
-type Person struct {
-	FullName
-	Occupation Occupation
-	Age        int
-	RawValue   RawValue
-	StrSlice   []string
-	IntSlice   []int `map:"int_slice[]"`
-	LeftEmpty  string
-}
-
 func TestUnmarshal(t *testing.T) {
-	person := Person{
-		LeftEmpty: "abcd",
-	}
+	t.Run("WithoutPointer", func(t *testing.T) {
+		var empty struct{}
 
-	val := url.Values{
-		"first_name":  []string{"abcd"},
-		"LastName":    []string{"hehehe"},
-		"Age":         []string{"21"},
-		"RawValue":    []string{"hello", "world"},
-		"StrSlice":    []string{"World", "hello"},
-		"int_slice[]": []string{"13", "23", "25"},
-	}
+		err := structmap.Unmarshal(nil, empty)
+		assert.ErrorContains(t, err, "pointer")
+	})
 
-	err := Unmarshal(val, &person)
-	require.NoError(t, err)
-}
+	t.Run("WithoutStruct", func(t *testing.T) {
+		var empty string
 
-func BenchmarkUnmarshal(b *testing.B) {
-	val := url.Values{
-		"first_name":  []string{"abcd"},
-		"LastName":    []string{"hehehe"},
-		"Age":         []string{"21"},
-		"RawValue":    []string{"hello", "world"},
-		"StrSlice":    []string{"World", "hello"},
-		"int_slice[]": []string{"13", "23", "25"},
-	}
+		err := structmap.Unmarshal(nil, &empty)
+		assert.ErrorContains(t, err, "cannot unmarshal into string")
+	})
 
-	person := Person{
-		LeftEmpty: "abcd",
-	}
-
-	for n := 0; n < b.N; n++ {
-		if err := Unmarshal(val, &person); err != nil {
-			b.Fatal(err)
+	t.Run("WithInvalidStructOption", func(t *testing.T) {
+		type emptyStruct struct {
+			Nested struct{} `map:",required"`
 		}
-	}
+
+		var empty emptyStruct
+
+		err := structmap.Unmarshal(nil, &empty)
+		assert.ErrorContains(t, err, "required")
+	})
+
+	t.Run("WithInvalidFieldOption", func(t *testing.T) {
+		type emptyStruct struct {
+			Field string `map:",unknownopt"`
+		}
+
+		var empty emptyStruct
+
+		err := structmap.Unmarshal(nil, &empty)
+		assert.ErrorContains(t, err, "unknownopt")
+	})
+
+	t.Run("WithUnknownType", func(t *testing.T) {
+		type emptyStruct struct {
+			Float64 float64
+		}
+
+		var empty *emptyStruct
+
+		err := structmap.Unmarshal(nil, &empty)
+		assert.ErrorContains(t, err, "cannot unmarshal into float64")
+	})
+
+	t.Run("WithUnknownSliceType", func(t *testing.T) {
+		type emptyStruct struct {
+			Float64 []float64
+		}
+
+		var empty emptyStruct
+
+		err := structmap.Unmarshal(nil, &empty)
+		assert.ErrorContains(t, err, "cannot unmarshal into slice of float64")
+	})
+
+	t.Run("WithNestedPointer", func(t *testing.T) {
+		type emptyStruct struct {
+			Field string
+		}
+
+		var empty *emptyStruct
+
+		err := structmap.Unmarshal(nil, &empty)
+		assert.NoError(t, err)
+	})
+
+	t.Run("WithFieldNames", func(t *testing.T) {
+		type testStruct struct {
+			Ignored    string `map:"-"`
+			NotIgnored string `map:"-,"`
+			Message    string `map:"message"`
+		}
+
+		expected := testStruct{
+			Ignored:    "valueHere",
+			NotIgnored: "valueThere",
+			Message:    "itsHere",
+		}
+
+		input := map[string][]string{
+			"Ignored": {"valueThere"},
+			"-":       {"valueThere"},
+			"Message": {"itsThere"},
+			"message": {"itsHere"},
+		}
+
+		actual := testStruct{
+			Ignored:    "valueHere",
+			NotIgnored: "valueHere",
+		}
+
+		err := structmap.Unmarshal(input, &actual)
+		require.NoError(t, err)
+		assert.Equal(t, expected, actual)
+	})
 }

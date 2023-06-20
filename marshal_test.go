@@ -1,30 +1,36 @@
-package dstruct
+package structmap_test
 
 import (
 	"testing"
 
+	"github.com/adzil/structmap"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 func TestMarshal(t *testing.T) {
-	person := Person{
-		FullName: FullName{
-			FirstName: "test",
-			LastName:  "hello",
-		},
-		Occupation: Occupation{
-			JobTitle:   "hehe",
-			Department: "Hoho",
-		},
-		IntSlice:  []int{1, 2, 34, 56},
-		StrSlice:  []string{"ab", "cf"},
-		LeftEmpty: "hohoho",
-		RawValue:  []string{"eee", "ncdw"},
-	}
+	t.Run("WithFieldNames", func(t *testing.T) {
+		type testStruct struct {
+			Ignored    string `map:"-"`
+			NotIgnored string `map:"-,"`
+			Message    string `map:"message"`
+		}
 
-	m := make(map[string][]string)
+		expected := map[string][]string{
+			"-":       {"valueThere"},
+			"message": {"itsHere"},
+		}
 
-	err := Marshal(person, m)
+		input := testStruct{
+			Ignored:    "valueHere",
+			NotIgnored: "valueThere",
+			Message:    "itsHere",
+		}
 
-	require.NoError(t, err)
+		actual := make(map[string][]string)
+
+		err := structmap.Marshal(input, actual)
+		require.NoError(t, err)
+		assert.Equal(t, expected, actual)
+	})
 }
